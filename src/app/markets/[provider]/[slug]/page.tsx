@@ -5,6 +5,7 @@ import type { Metadata } from 'next';
 import { fetchPolymarketMarketBySlug } from '@/lib/api/polymarket';
 import { fetchKalshiMarketByTicker } from '@/lib/api/kalshi';
 import { fetchSimmerMarketById } from '@/lib/api/simmer';
+import { getMarketTitle, getMarketDescription, getMarketImage, type Provider } from '@/lib/types/market-helpers';
 
 interface MarketDetailsPageProps {
   params: Promise<{
@@ -13,10 +14,14 @@ interface MarketDetailsPageProps {
   }>;
 }
 
+function isValidProvider(provider: string): provider is Provider {
+  return provider === 'polymarket' || provider === 'kalshi' || provider === 'simmer';
+}
+
 export async function generateMetadata({ params }: MarketDetailsPageProps): Promise<Metadata> {
   const { provider, slug } = await params;
 
-  if (provider !== 'polymarket' && provider !== 'kalshi' && provider !== 'simmer') {
+  if (!isValidProvider(provider)) {
     return {
       title: 'Market Not Found',
     };
@@ -35,23 +40,9 @@ export async function generateMetadata({ params }: MarketDetailsPageProps): Prom
       };
     }
 
-    const title = provider === 'polymarket'
-      ? (market.title || market.question || 'Market')
-      : provider === 'kalshi'
-      ? market.title || 'Market'
-      : (market as any).question || 'Market';
-
-    const description = provider === 'polymarket'
-      ? (market.description || `AI-powered analysis for ${title}`)
-      : provider === 'kalshi'
-      ? (market.subtitle || `AI-powered analysis for ${title}`)
-      : ((market as any).context || (market as any).resolution_criteria || `AI-powered analysis for ${title}`);
-
-    const imageUrl = provider === 'polymarket'
-      ? (market.image || market.icon || market.imageUrl)
-      : provider === 'kalshi'
-      ? market.image_url
-      : (market as any).image_url;
+    const title = getMarketTitle(market, provider);
+    const description = getMarketDescription(market, provider) || `AI-powered analysis for ${title}`;
+    const imageUrl = getMarketImage(market, provider);
 
     return {
       title,
@@ -86,7 +77,7 @@ export async function generateMetadata({ params }: MarketDetailsPageProps): Prom
 export default async function MarketDetailsPage({ params }: MarketDetailsPageProps) {
   const { provider, slug } = await params;
 
-  if (provider !== 'polymarket' && provider !== 'kalshi' && provider !== 'simmer') {
+  if (!isValidProvider(provider)) {
     notFound();
   }
 
@@ -100,19 +91,14 @@ export default async function MarketDetailsPage({ params }: MarketDetailsPagePro
       : await fetchSimmerMarketById(slug);
 
     if (market) {
+      const title = getMarketTitle(market, provider);
+      const description = getMarketDescription(market, provider);
+      
       structuredData = {
         '@context': 'https://schema.org',
         '@type': 'FinancialProduct',
-        name: provider === 'polymarket' 
-          ? (market.title || market.question) 
-          : provider === 'kalshi'
-          ? market.title
-          : (market as any).question,
-        description: provider === 'polymarket' 
-          ? market.description 
-          : provider === 'kalshi'
-          ? market.subtitle
-          : ((market as any).context || (market as any).resolution_criteria),
+        name: title,
+        description: description || `AI-powered analysis for ${title}`,
         provider: {
           '@type': 'Organization',
           name: provider === 'polymarket' ? 'Polymarket' : provider === 'kalshi' ? 'Kalshi' : 'Simmer',

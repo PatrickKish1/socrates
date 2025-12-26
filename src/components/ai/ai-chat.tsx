@@ -12,6 +12,18 @@ import { parseKalshiUrl } from '@/lib/api/kalshi';
 import { parseSimmerUrl } from '@/lib/api/simmer';
 import { MarkdownRenderer } from './markdown-renderer';
 import { TTSControls } from './tts-controls';
+import { MarketSearchResults } from './market-search-results';
+
+interface SearchResult {
+  provider: 'polymarket' | 'kalshi' | 'simmer';
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  url: string;
+  relevanceScore?: number;
+}
 
 interface Message {
   id: string;
@@ -20,6 +32,7 @@ interface Message {
   timestamp: Date;
   marketSlug?: string;
   provider?: 'polymarket' | 'kalshi' | 'simmer';
+  marketSearchResults?: SearchResult[];
 }
 
 interface ChatThread {
@@ -118,6 +131,21 @@ export function AIChat() {
       const kalshiTicker = parseKalshiUrl(input);
       const simmerId = parseSimmerUrl(input);
       
+      // Determine if we should search for markets
+      // Search if: no URL provided, and message seems to be asking about a market
+      const shouldSearchMarkets = !polymarketSlug && !kalshiTicker && !simmerId && (
+        input.toLowerCase().includes('market') ||
+        input.toLowerCase().includes('prediction') ||
+        input.toLowerCase().includes('find') ||
+        input.toLowerCase().includes('search') ||
+        input.toLowerCase().includes('what') ||
+        input.toLowerCase().includes('show me') ||
+        input.toLowerCase().includes('analyze') ||
+        input.toLowerCase().includes('polymarket') ||
+        input.toLowerCase().includes('simmer') ||
+        input.toLowerCase().includes('kalshi')
+      );
+      
       let marketContext = null;
       if (polymarketSlug || kalshiTicker || simmerId) {
         try {
@@ -164,6 +192,7 @@ export function AIChat() {
               : simmerId
               ? { provider: 'simmer', slug: simmerId }
               : null),
+          shouldSearchMarkets,
         }),
       });
 
@@ -212,6 +241,7 @@ export function AIChat() {
         timestamp: new Date(),
         marketSlug,
         provider: marketProvider,
+        marketSearchResults: data.marketSearchResults || undefined,
       };
 
       const finalThread = {
@@ -308,6 +338,44 @@ export function AIChat() {
                             marketSlug={message.marketSlug}
                             provider={message.provider}
                           />
+                          {message.marketSearchResults && message.marketSearchResults.length > 0 && (
+                            <div className="mt-4">
+                              <MarketSearchResults
+                                results={message.marketSearchResults}
+                                onSelectMarket={(result) => {
+                                  // Navigate to market details page
+                                  window.location.href = `/markets/${result.provider}/${result.slug}`;
+                                }}
+                                onAnalyzeAll={async () => {
+                                  // Analyze all similar markets
+                                  if (message.marketSearchResults && message.marketSearchResults.length > 0) {
+                                    const analysisPromises = message.marketSearchResults.map(async (result) => {
+                                      try {
+                                        const response = await fetch(`/api/markets/parse-url`, {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ 
+                                            url: result.url 
+                                          }),
+                                        });
+                                        if (response.ok) {
+                                          const data = await response.json();
+                                          return data.market ? { ...result, marketData: data.market } : null;
+                                        }
+                                      } catch (error) {
+                                        console.error(`Error fetching market ${result.id}:`, error);
+                                      }
+                                      return null;
+                                    });
+                                    
+                                    // You could trigger analysis for all markets here
+                                    // For now, just show a message
+                                    alert(`Analyzing ${message.marketSearchResults.length} markets... This feature will provide comparative analysis across all similar markets.`);
+                                  }
+                                }}
+                              />
+                            </div>
+                          )}
                           <div className="mt-3 pt-3 border-t border-border/50">
                             <TTSControls text={message.content} />
                           </div>

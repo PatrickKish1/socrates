@@ -19,7 +19,7 @@ if (!OPENAI_API_KEY) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, threadId, history, marketContext } = await request.json();
+    const { message, threadId, history, marketContext, shouldSearchMarkets } = await request.json();
 
     const model = new ChatOpenAI({
       modelName: 'gpt-4o',
@@ -59,6 +59,46 @@ export async function POST(request: NextRequest) {
       marketInfo = `\n\nMARKET CONTEXT:\nQuestion: ${question}\nDescription: ${description || 'No description'}\nProvider: ${marketContext.provider}\n\nYou can analyze this market and provide insights. If the user wants a detailed signal, suggest they use the "Get AI Signal" button on the market details page.`;
     } else if (marketContext && marketContext.slug) {
       marketInfo = `\n\nMARKET CONTEXT:\nProvider: ${marketContext.provider}\nSlug: ${marketContext.slug}\n\nI can help analyze this market.`;
+    }
+
+    // Check if we should search for markets
+    let marketSearchResults = null;
+    if (shouldSearchMarkets && !marketContext) {
+      try {
+        // Get base URL for server-side fetch
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL 
+          ? process.env.NEXT_PUBLIC_APP_URL 
+          : process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}` 
+          : 'http://localhost:3000';
+        
+        const searchResponse = await fetch(`${baseUrl}/api/markets/search`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: message,
+            limit: 5,
+          }),
+        });
+
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.json();
+          if (searchData.success && searchData.results && searchData.results.length > 0) {
+            marketSearchResults = searchData.results;
+            
+            // Add market search results to context
+            const marketsList = searchData.results.map((r: any, idx: number) => 
+              `${idx + 1}. [${r.provider.toUpperCase()}] ${r.title}${r.description ? ` - ${r.description}` : ''}\n   Link: ${r.url}\n   Our Link: /markets/${r.provider}/${r.slug}`
+            ).join('\n\n');
+            
+            marketInfo += `\n\nMARKET SEARCH RESULTS:\nI found ${searchData.results.length} relevant market(s):\n\n${marketsList}\n\nYou can analyze any of these markets. If multiple markets are similar, you can provide analysis for all of them. Always include the direct links to the original market pages so users can verify.`;
+          }
+        }
+      } catch (error) {
+        console.error('Market search error:', error);
+      }
     }
 
     let response: string;
@@ -114,6 +154,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       response,
       threadId,
+      marketSearchResults, // Include search results if available
     });
   } catch (error) {
     console.error('Error in chat:', error);
